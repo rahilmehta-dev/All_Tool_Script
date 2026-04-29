@@ -1,0 +1,3 @@
+[submodule "AutoRestTest"]
+	path = AutoRestTest
+	url = https://github.com/selab-gatech/AutoRestTest.git
