@@ -184,10 +184,14 @@ def run_schemathesis(project, bug, version, schema_path, base_url, api_headers, 
 # RESTler
 # ============================
 
-def run_restler(project, bug, version, schema_path, api_headers, seeds, test_port, fuzz_port, time_budget_hours):
+def run_restler(project, bug, version, schema_path, api_headers, runs, test_port, fuzz_port,
+                time_budget_hours, search_strategy):
+    # RESTler has NO --seed flag. It supports --search_strategy instead.
+    # Multiple fuzz runs are used to gather variance; each run gets a fresh API checkout.
     print("\n==============================")
     print(" Running RESTler")
     print("==============================\n")
+    print(f"[Config] RESTler fuzz runs: {runs}, strategy: {search_strategy}, time per run: {time_budget_hours}h\n")
 
     restler_root = os.path.join(os.getcwd(), "restler")
     os.makedirs(restler_root, exist_ok=True)
@@ -237,7 +241,7 @@ def run_restler(project, bug, version, schema_path, api_headers, seeds, test_por
         print(f"    Compile failed (exit {e.returncode}), skipping RESTler entirely\n")
         return
 
-    print(">>> RESTler test")
+    print(">>> RESTler test (smoke test)")
     test_cmd = [
         "docker", "run", "--platform", "linux/amd64", "--rm",
         "-v", f"{os.getcwd()}:/work",
@@ -258,13 +262,13 @@ def run_restler(project, bug, version, schema_path, api_headers, seeds, test_por
     except subprocess.CalledProcessError as e:
         print(f"    Test failed (exit {e.returncode}), continuing to fuzz...\n")
 
-    for s in seeds:
-        print(f">>> RESTler fuzz seed {s}")
-        checkout(project, bug, version, s, "RESTler")
+    for run_num in range(1, runs + 1):
+        print(f">>> RESTler fuzz run {run_num}/{runs}")
+        checkout(project, bug, version, run_num, "RESTler")
 
-        seed_dir = os.path.join(restler_out, f"fuzz_seed_{s}")
-        os.makedirs(seed_dir, exist_ok=True)
-        seed_dir_container = f"{restler_out_container}/fuzz_seed_{s}"
+        run_dir = os.path.join(restler_out, f"fuzz_run_{run_num}")
+        os.makedirs(run_dir, exist_ok=True)
+        run_dir_container = f"{restler_out_container}/fuzz_run_{run_num}"
 
         fuzz_cmd = [
             "docker", "run", "--platform", "linux/amd64", "--rm",
@@ -272,7 +276,7 @@ def run_restler(project, bug, version, schema_path, api_headers, seeds, test_por
             *DOCKER_HOST_EXTRA,
             "mcr.microsoft.com/restlerfuzzer/restler:v8.5.0",
             "dotnet", "/RESTler/restler/Restler.dll",
-            "--workingDirPath", seed_dir_container,
+            "--workingDirPath", run_dir_container,
             "fuzz",
             "--grammar_file", f"{restler_out_container}/Compile/grammar.py",
             "--dictionary_file", f"{restler_out_container}/Compile/dict.json",
@@ -280,13 +284,14 @@ def run_restler(project, bug, version, schema_path, api_headers, seeds, test_por
             "--target_ip", "host.docker.internal",
             "--target_port", str(fuzz_port),
             "--time_budget", str(time_budget_hours),
+            "--search_strategy", search_strategy,
         ]
 
         try:
             subprocess.run(fuzz_cmd, check=True)
-            print(f"    Finished seed {s}, output: {seed_dir}\n")
+            print(f"    Finished run {run_num}, output: {run_dir}\n")
         except subprocess.CalledProcessError as e:
-            print(f"    Fuzz seed {s} failed (exit {e.returncode}), continuing...\n")
+            print(f"    Fuzz run {run_num} failed (exit {e.returncode}), continuing...\n")
 
 
 # ============================
@@ -407,6 +412,20 @@ if __name__ == "__main__":
         type=float,
         help=f"RESTler fuzz time_budget in HOURS (default: {RESTLER_TIME_BUDGET_DEFAULT})",
     )
+    parser.add_argument(
+        "--restler-runs",
+        type=int,
+        default=len(DEFAULT_SEEDS),
+        help=f"Number of RESTler fuzz runs (default: {len(DEFAULT_SEEDS)}). "
+             "RESTler has no --seed flag; use this to control how many independent fuzz campaigns to run.",
+    )
+    parser.add_argument(
+        "--restler-search-strategy",
+        choices=["bfs-fast", "bfs", "bfs-cheap", "random-walk"],
+        default="bfs-fast",
+        help="RESTler search strategy (default: bfs-fast). "
+             "Options: bfs-fast, bfs, bfs-cheap, random-walk",
+    )
 
     # AutoRestTest
     parser.add_argument(
@@ -449,6 +468,16 @@ if __name__ == "__main__":
         required=True,
         help="Version to check out: buggy or patched for the bug"
     )
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help=(
+            "Smoke-test mode: runs every tool for ~2 minutes with 1 seed to verify "
+            "API connectivity, Docker networking, and output paths before a full run. "
+            "Overrides: EvoMaster maxTime=2m, RESTler time_budget=2m (1 run), "
+            "Schemathesis max-examples=5, AutoRestTest time=120s (1 run)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -457,7 +486,18 @@ if __name__ == "__main__":
     run_res = args.run in ("restler", "all")
     run_auto = args.run in ("autorest", "all")
 
-    seeds = args.seeds if args.seeds is not None else DEFAULT_SEEDS
+    # --smoke: 1 seed only, 2-min caps, 5 Schemathesis examples — verifies connectivity and output paths
+    SMOKE_SEED = [DEFAULT_SEEDS[0]]
+    SMOKE_EVOMASTER_TIME = "2m"
+    SMOKE_RESTLER_HOURS = round(2 / 60, 4)   # 2 minutes in hours
+    SMOKE_AUTOREST_TIME = 120                 # 2 minutes in seconds
+    SMOKE_SCHEMA_EXAMPLES = 5
+
+    if args.smoke:
+        seeds = SMOKE_SEED
+        print("\n*** SMOKE MODE: 1 seed, 2-minute time caps, 5 Schemathesis examples ***\n")
+    else:
+        seeds = args.seeds if args.seeds is not None else DEFAULT_SEEDS
     print(f"[Config] Using seeds: {seeds}")
 
     api_headers = parse_headers(args.header) if args.header else []
@@ -475,12 +515,19 @@ if __name__ == "__main__":
         print(f"ERROR: Schema file not found: {args.schema}")
         raise SystemExit(1)
 
-    evomaster_max_time = f"{args.evomaster_hours}h" if args.evomaster_hours is not None else f"{DEFAULT_EVOMASTER_HOURS}h"
+    if args.smoke:
+        evomaster_max_time = SMOKE_EVOMASTER_TIME
+        restler_time_budget = SMOKE_RESTLER_HOURS
+        restler_runs = 1
+        autorest_time = SMOKE_AUTOREST_TIME
+    else:
+        evomaster_max_time = f"{args.evomaster_hours}h" if args.evomaster_hours is not None else f"{DEFAULT_EVOMASTER_HOURS}h"
+        restler_time_budget = args.restler_hours if args.restler_hours is not None else RESTLER_TIME_BUDGET_DEFAULT
+        restler_runs = args.restler_runs
+        autorest_time = args.autorest_time
+
     print(f"[Config] EvoMaster maxTime: {evomaster_max_time}")
-
-    restler_time_budget = args.restler_hours if args.restler_hours is not None else RESTLER_TIME_BUDGET_DEFAULT
-    print(f"[Config] RESTler time_budget (hours): {restler_time_budget}")
-
+    print(f"[Config] RESTler time_budget (hours): {restler_time_budget}, runs: {restler_runs}")
     print(f"[Config] Project: {args.project}, Bug: {args.bug}, Version: {args.version}")
     print(f"[Config] Selected mode: {args.run}")
 
@@ -497,6 +544,10 @@ if __name__ == "__main__":
         )
 
     if run_sch:
+        # In smoke mode override max_examples globally for this run
+        if args.smoke:
+            global SCHEMA_MAX_EXAMPLES
+            SCHEMA_MAX_EXAMPLES = SMOKE_SCHEMA_EXAMPLES
         run_schemathesis(
             project=args.project,
             bug=args.bug,
@@ -514,10 +565,11 @@ if __name__ == "__main__":
             version=args.version,
             schema_path=args.schema,
             api_headers=api_headers,
-            seeds=seeds,
+            runs=restler_runs,
             test_port=args.restler_test_port,
             fuzz_port=args.restler_fuzz_port,
             time_budget_hours=restler_time_budget,
+            search_strategy=args.restler_search_strategy,
         )
 
     if run_auto:
@@ -526,10 +578,10 @@ if __name__ == "__main__":
             bug=args.bug,
             version=args.version,
             schema_path=args.schema,
-            autorest_runs=args.autorest_runs,
+            autorest_runs=1 if args.smoke else args.autorest_runs,
             autorest_output_dir=args.autorest_output_dir,
             autorest_workdir=args.autorest_workdir,
-            autorest_time_seconds=args.autorest_time,
+            autorest_time_seconds=autorest_time,
         )
 
     print("=== Done ===")

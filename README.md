@@ -109,9 +109,10 @@ python3 run_all.py --run autorest --project podman --bug 1 --version buggy \
 | Argument | Default | Description |
 |---|---|---|
 | `--run` | `all` | Which tools to run: `evomaster`, `schemathesis`, `restler`, `autorest`, `all` |
+| `--smoke` | off | Smoke-test mode: 2 min per tool, 1 seed — verifies connectivity and output before a full run |
 | `--url` | — | Base API URL — required for EvoMaster, Schemathesis, RESTler |
 | `--header` | — | HTTP header e.g. `--header "DOLAPIKEY: abc"` — can repeat |
-| `--seeds` | `21 23 33 42 2` | Seeds for EvoMaster, Schemathesis, RESTler fuzz |
+| `--seeds` | `21 23 33 42 2` | Seeds for EvoMaster and Schemathesis (RESTler uses `--restler-runs` instead) |
 
 ### EvoMaster
 
@@ -121,9 +122,15 @@ python3 run_all.py --run autorest --project podman --bug 1 --version buggy \
 
 ### RESTler
 
+> **Note:** RESTler has no `--seed` flag. It is a stateful BFS fuzzer, not a random fuzzer.
+> Use `--restler-runs` to control how many independent fuzz campaigns to run (each restarts the API via checkout).
+> Use `--restler-search-strategy` to change exploration behavior.
+
 | Argument | Default | Description |
 |---|---|---|
-| `--restler-hours` | `1` | Fuzz time budget per seed in hours |
+| `--restler-runs` | `5` | Number of independent fuzz campaigns |
+| `--restler-hours` | `1` | Time budget per fuzz run in hours |
+| `--restler-search-strategy` | `bfs-fast` | Search strategy: `bfs-fast`, `bfs`, `bfs-cheap`, `random-walk` |
 | `--restler-test-port` | `8030` | Port for the RESTler smoke-test phase |
 | `--restler-fuzz-port` | `809` | Port for the RESTler fuzz phase |
 
@@ -226,8 +233,8 @@ restler/
   restler_custom_dict.json
   restler_out/
     Compile/           # Grammar and dictionary from compile step
-    fuzz_seed_21/      # Fuzz results per seed
-    fuzz_seed_23/
+    fuzz_run_1/        # Fuzz results per run (RESTler has no seed concept)
+    fuzz_run_2/
     ...
 
 autorest/

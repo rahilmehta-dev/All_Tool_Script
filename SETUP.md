@@ -136,7 +136,39 @@ docker pull mcr.microsoft.com/restlerfuzzer/restler:v8.5.0
 
 ---
 
-## 8. Run the script
+## 8. Smoke test (run this first)
+
+Before committing to a full multi-hour run, use `--smoke` to verify that every tool can connect to the API and write output correctly. Each tool runs for ~2 minutes with a single seed:
+
+```bash
+python3 run_all.py \
+  --smoke \
+  --run all \
+  --project dolibarr \
+  --bug 1 \
+  --version buggy \
+  --schema api.json \
+  --url http://localhost:8030 \
+  --header "DOLAPIKEY: your_key" \
+  --autorest-workdir AutoRestTest
+```
+
+What `--smoke` overrides:
+| Tool | Normal | Smoke |
+|---|---|---|
+| EvoMaster | 1h per seed × 5 seeds | 2m × 1 seed |
+| Schemathesis | 1 example × 5 seeds | 5 examples × 1 seed |
+| RESTler | 1h per run × 5 runs | 2m × 1 run |
+| AutoRestTest | configured time × N runs | 120s × 1 run |
+
+Check that:
+- All four tools produced output in `evomaster/`, `schemathesis/`, `restler/`, `autorest/`
+- No "Cannot connect" or "404" errors in the logs
+- RESTler compile and test phases succeeded
+
+---
+
+## 9. Run the script (full run)
 
 ```bash
 python3 run_all.py \
@@ -186,7 +218,7 @@ python3 run_all.py \
 |---|---|
 | EvoMaster | `evomaster/em_seed_<N>/` + `evomaster/em_seed_<N>.log` |
 | Schemathesis | `schemathesis/` |
-| RESTler | `restler/restler_out/` |
+| RESTler | `restler/restler_out/fuzz_run_<N>/` (RESTler has no seed — runs are numbered) |
 | AutoRestTest | `autorest/run<N>/` (contains `report.json`, `server_errors.json`, etc.) |
 
 ---
