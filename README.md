@@ -7,7 +7,7 @@ This script automates the execution of four REST API testing tools against a [De
 - **RESTler** — runs via Docker, no local install needed
 - **AutoRestTest** — runs on the host machine via Poetry
 
-For each tool and each seed, the script calls `defects4rest checkout` to start the correct version of the API before running the tool. Output is stored in separate directories: `evomaster/`, `schemathesis/`, `restler/`, `autorest/`.
+For each tool and each seed, the script calls `defects4rest checkout` to start the correct version of the API before running the tool. All output is written under a single directory named `<project>_<bug>/` (e.g. `podman_1/`).
 
 ---
 
@@ -213,45 +213,47 @@ Once it runs interactively, the script can drive it headlessly with `--skip-wiza
 
 ## Output structure
 
+All output is written under `<project>_<bug>/`, e.g. `podman_1/` for `--project podman --bug 1`.
+
 ```
-evomaster/
-  em_seed_21/          # EvoMaster generated tests
-  em_seed_23/
-  ...
-  em_seed_21.log       # Full stdout/stderr log per seed
-  em_seed_23.log
-  ...
-
-schemathesis/
-  logs_har_seed21/     # HAR traffic logs
-  st_seed21.xml        # JUnit XML report
-  st_run_seed21.log    # Full Schemathesis log
-  ...
-
-restler/
-  compiler_config.json
-  restler_custom_dict.json
-  restler_out/
-    Compile/           # Grammar and dictionary from compile step
-    fuzz_run_1/        # Fuzz results per run (RESTler has no seed concept)
-    fuzz_run_2/
+podman_1/
+  EvoMaster/
+    Seed_21/           # EvoMaster generated tests
+    Seed_23/
+    ...
+    Seed_21.log        # Full stdout/stderr log per seed
+    Seed_23.log
     ...
 
-autorest/
-  run1/                # Contents of AutoRestTest's data/ folder after run 1
-    report.json
-    operation_status_codes.json
-    server_errors.json
-    successful_parameters.json
-    successful_responses.json
-    successful_bodies.json
-    successful_primitives.json
-    q_tables.json
-  run2/
-  ...
+  Schemathesis/
+    Seed_21/           # HAR traffic logs
+    Seed_21.xml        # JUnit XML report
+    Seed_21.log        # Full Schemathesis log
+    ...
+
+  RESTler/
+    compiler_config.json
+    restler_custom_dict.json
+    Compile/           # Grammar and dictionary from compile step
+    Run_1/             # Fuzz results per run (RESTler has no seed)
+    Run_2/
+    ...
+
+  AutoRestTest/        # disabled by default — set AUTOREST_ENABLED = True to enable
+    Run_1/
+      report.json
+      operation_status_codes.json
+      server_errors.json
+      successful_parameters.json
+      successful_responses.json
+      successful_bodies.json
+      successful_primitives.json
+      q_tables.json
+    Run_2/
+    ...
 ```
 
-> AutoRestTest output files can grow to several GB for long runs. Clear the `autorest/` directory when no longer needed.
+> AutoRestTest output files can grow to several GB for long runs. Clear the `AutoRestTest/` directory when no longer needed.
 
 ---
 

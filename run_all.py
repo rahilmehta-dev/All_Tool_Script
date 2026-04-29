@@ -27,6 +27,9 @@ AUTOREST_DEFAULT_RUNS = 1
 AUTOREST_DEFAULT_OUTPUT_DIR = "autorest"
 AUTOREST_DEFAULT_TIME_SECONDS = 1200   # 20 min per run (MARL phase only)
 
+# Set to True to re-enable AutoRestTest
+AUTOREST_ENABLED = False
+
 
 def parse_headers(header_args):
     """Parse --header "Name: value" arguments into list of (name, value)."""
@@ -85,8 +88,8 @@ def run_evomaster(project, bug, version, schema_path, base_url, api_headers, see
     print(" Running EvoMaster")
     print("==============================\n")
 
-    evomaster_root = os.path.join(os.getcwd(), "evomaster")
-    os.makedirs(evomaster_root, exist_ok=True)
+    out_root = os.path.join(os.getcwd(), f"{project}_{bug}", "EvoMaster")
+    os.makedirs(out_root, exist_ok=True)
 
     schema_basename = os.path.basename(schema_path)
     evomaster_schema_url = f"file:///work/{schema_basename}"
@@ -95,9 +98,9 @@ def run_evomaster(project, bug, version, schema_path, base_url, api_headers, see
         print(f">>> EvoMaster seed {seed}")
         checkout(project, bug, version, seed, "EvoMaster")
 
-        output_folder_host = os.path.join(evomaster_root, f"em_seed_{seed}")
-        os.makedirs(output_folder_host, exist_ok=True)
-        output_folder_container = f"/work/evomaster/em_seed_{seed}"
+        seed_dir_host = os.path.join(out_root, f"Seed_{seed}")
+        os.makedirs(seed_dir_host, exist_ok=True)
+        seed_dir_container = f"/work/{project}_{bug}/EvoMaster/Seed_{seed}"
 
         cmd = [
             "docker", "run", "--rm",
@@ -111,14 +114,14 @@ def run_evomaster(project, bug, version, schema_path, base_url, api_headers, see
             "--maxTime", evomaster_max_time,
             "--ratePerMinute", str(EVOMASTER_RATE_PER_MIN),
             "--seed", str(seed),
-            "--outputFolder", output_folder_container,
+            "--outputFolder", seed_dir_container,
             "--outputFormat", "PYTHON_UNITTEST",
         ]
 
         for i, (name, value) in enumerate(api_headers):
             cmd.extend([f"--header{i}", f"{name}: {value}"])
 
-        log_file = os.path.join(evomaster_root, f"em_seed_{seed}.log")
+        log_file = os.path.join(out_root, f"Seed_{seed}.log")
         with open(log_file, "w") as f:
             try:
                 subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=True)
@@ -126,7 +129,7 @@ def run_evomaster(project, bug, version, schema_path, base_url, api_headers, see
                 print(f"  EvoMaster seed {seed} failed (exit {e.returncode}), continuing...")
 
         print(f"    Log: {log_file}")
-        print(f"    Output: {output_folder_host}\n")
+        print(f"    Output: {seed_dir_host}\n")
 
 
 # ============================
@@ -138,16 +141,16 @@ def run_schemathesis(project, bug, version, schema_path, base_url, api_headers, 
     print(" Running Schemathesis")
     print("==============================\n")
 
-    schema_root = os.path.join(os.getcwd(), "schemathesis")
-    os.makedirs(schema_root, exist_ok=True)
+    out_root = os.path.join(os.getcwd(), f"{project}_{bug}", "Schemathesis")
+    os.makedirs(out_root, exist_ok=True)
 
     for seed in seeds:
         print(f">>> Schemathesis seed {seed}")
         checkout(project, bug, version, seed, "schemathesis")
 
-        har_dir = os.path.join(schema_root, f"logs_har_seed{seed}")
+        har_dir = os.path.join(out_root, f"Seed_{seed}")
         os.makedirs(har_dir, exist_ok=True)
-        junit_path = os.path.join(schema_root, f"st_seed{seed}.xml")
+        junit_path = os.path.join(out_root, f"Seed_{seed}.xml")
 
         cmd = [
             "schemathesis", "run",
@@ -168,7 +171,7 @@ def run_schemathesis(project, bug, version, schema_path, base_url, api_headers, 
         for name, value in api_headers:
             cmd.extend(["--header", f"{name}: {value}"])
 
-        log_file = os.path.join(schema_root, f"st_run_seed{seed}.log")
+        log_file = os.path.join(out_root, f"Seed_{seed}.log")
         with open(log_file, "w") as f:
             try:
                 subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=True)
@@ -193,11 +196,12 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
     print("==============================\n")
     print(f"[Config] RESTler fuzz runs: {runs}, strategy: {search_strategy}, time per run: {time_budget_hours}h\n")
 
-    restler_root = os.path.join(os.getcwd(), "restler")
-    os.makedirs(restler_root, exist_ok=True)
+    out_root = os.path.join(os.getcwd(), f"{project}_{bug}", "RESTler")
+    os.makedirs(out_root, exist_ok=True)
+    out_root_container = f"/work/{project}_{bug}/RESTler"
 
     schema_filename = os.path.basename(schema_path)
-    schema_copy_path = os.path.join(restler_root, schema_filename)
+    schema_copy_path = os.path.join(out_root, schema_filename)
     shutil.copy2(schema_path, schema_copy_path)
     print(f"[Config] Copied schema to: {schema_copy_path}")
 
@@ -206,21 +210,17 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
     if restler_header_dict:
         custom_dict["restler_custom_payload_header"] = restler_header_dict
 
-    custom_dict_path = os.path.join(restler_root, "restler_custom_dict.json")
+    custom_dict_path = os.path.join(out_root, "restler_custom_dict.json")
     with open(custom_dict_path, "w") as f:
         json.dump(custom_dict, f, indent=2)
 
     compiler_config = {
-        "SwaggerSpecFilePath": [f"/work/restler/{schema_filename}"],
-        "CustomDictionaryFilePath": "/work/restler/restler_custom_dict.json"
+        "SwaggerSpecFilePath": [f"{out_root_container}/{schema_filename}"],
+        "CustomDictionaryFilePath": f"{out_root_container}/restler_custom_dict.json"
     }
-    compiler_config_path = os.path.join(restler_root, "compiler_config.json")
+    compiler_config_path = os.path.join(out_root, "compiler_config.json")
     with open(compiler_config_path, "w") as f:
         json.dump(compiler_config, f, indent=2)
-
-    restler_out = os.path.join(restler_root, "restler_out")
-    os.makedirs(restler_out, exist_ok=True)
-    restler_out_container = "/work/restler/restler_out"
 
     # --add-host ensures host.docker.internal resolves on Linux; Docker Desktop (macOS/Windows) defines it automatically.
     DOCKER_HOST_EXTRA = ["--add-host=host.docker.internal:host-gateway"]
@@ -231,8 +231,8 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
         "-v", f"{os.getcwd()}:/work",
         "mcr.microsoft.com/restlerfuzzer/restler:v8.5.0",
         "dotnet", "/RESTler/restler/Restler.dll",
-        "--workingDirPath", restler_out_container,
-        "compile", "/work/restler/compiler_config.json",
+        "--workingDirPath", out_root_container,
+        "compile", f"{out_root_container}/compiler_config.json",
     ]
     try:
         subprocess.run(compile_cmd, check=True)
@@ -248,10 +248,10 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
         *DOCKER_HOST_EXTRA,
         "mcr.microsoft.com/restlerfuzzer/restler:v8.5.0",
         "dotnet", "/RESTler/restler/Restler.dll",
-        "--workingDirPath", restler_out_container,
+        "--workingDirPath", out_root_container,
         "test",
-        "--grammar_file", f"{restler_out_container}/Compile/grammar.py",
-        "--dictionary_file", f"{restler_out_container}/Compile/dict.json",
+        "--grammar_file", f"{out_root_container}/Compile/grammar.py",
+        "--dictionary_file", f"{out_root_container}/Compile/dict.json",
         "--no_ssl",
         "--target_ip", "host.docker.internal",
         "--target_port", str(test_port),
@@ -266,9 +266,9 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
         print(f">>> RESTler fuzz run {run_num}/{runs}")
         checkout(project, bug, version, run_num, "RESTler")
 
-        run_dir = os.path.join(restler_out, f"fuzz_run_{run_num}")
-        os.makedirs(run_dir, exist_ok=True)
-        run_dir_container = f"{restler_out_container}/fuzz_run_{run_num}"
+        run_dir_host = os.path.join(out_root, f"Run_{run_num}")
+        os.makedirs(run_dir_host, exist_ok=True)
+        run_dir_container = f"{out_root_container}/Run_{run_num}"
 
         fuzz_cmd = [
             "docker", "run", "--platform", "linux/amd64", "--rm",
@@ -278,8 +278,8 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
             "dotnet", "/RESTler/restler/Restler.dll",
             "--workingDirPath", run_dir_container,
             "fuzz",
-            "--grammar_file", f"{restler_out_container}/Compile/grammar.py",
-            "--dictionary_file", f"{restler_out_container}/Compile/dict.json",
+            "--grammar_file", f"{out_root_container}/Compile/grammar.py",
+            "--dictionary_file", f"{out_root_container}/Compile/dict.json",
             "--no_ssl",
             "--target_ip", "host.docker.internal",
             "--target_port", str(fuzz_port),
@@ -289,7 +289,7 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
 
         try:
             subprocess.run(fuzz_cmd, check=True)
-            print(f"    Finished run {run_num}, output: {run_dir}\n")
+            print(f"    Finished run {run_num}, output: {run_dir_host}\n")
         except subprocess.CalledProcessError as e:
             print(f"    Fuzz run {run_num} failed (exit {e.returncode}), continuing...\n")
 
@@ -298,7 +298,7 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
 # AutoRestTest
 # ============================
 
-def run_autorest(project, bug, version, schema_path, autorest_runs, autorest_output_dir, autorest_workdir, autorest_time_seconds):
+def run_autorest(project, bug, version, schema_path, autorest_runs, autorest_workdir, autorest_time_seconds):
     print("\n==============================")
     print(" Running AutoRestTest")
     print("==============================\n")
@@ -307,7 +307,8 @@ def run_autorest(project, bug, version, schema_path, autorest_runs, autorest_out
         print("  ERROR: --autorest-workdir is required for AutoRestTest. Skipping.\n")
         return
 
-    os.makedirs(autorest_output_dir, exist_ok=True)
+    out_root = os.path.join(os.getcwd(), f"{project}_{bug}", "AutoRestTest")
+    os.makedirs(out_root, exist_ok=True)
 
     # AutoRestTest needs an absolute spec path so it can be found from the workdir.
     schema_abs = os.path.abspath(schema_path)
@@ -332,7 +333,7 @@ def run_autorest(project, bug, version, schema_path, autorest_runs, autorest_out
             print(f"    AutoRestTest run {i} failed (exit {e.returncode}), continuing...")
             continue
 
-        dest = os.path.join(autorest_output_dir, f"run{i}")
+        dest = os.path.join(out_root, f"Run_{i}")
         if os.path.exists(data_dir):
             shutil.move(data_dir, dest)
             print(f"    Moved output to: {dest}")
@@ -439,11 +440,6 @@ if __name__ == "__main__":
         type=int,
         default=AUTOREST_DEFAULT_TIME_SECONDS,
         help=f"AutoRestTest MARL time budget per run in SECONDS (default: {AUTOREST_DEFAULT_TIME_SECONDS})",
-    )
-    parser.add_argument(
-        "--autorest-output-dir",
-        default=AUTOREST_DEFAULT_OUTPUT_DIR,
-        help=f"Directory where run outputs are collected (default: {AUTOREST_DEFAULT_OUTPUT_DIR})",
     )
     parser.add_argument(
         "--autorest-workdir",
@@ -572,14 +568,15 @@ if __name__ == "__main__":
             search_strategy=args.restler_search_strategy,
         )
 
-    if run_auto:
+    if run_auto and not AUTOREST_ENABLED:
+        print("\n[AutoRestTest] Disabled (set AUTOREST_ENABLED = True in script to enable).\n")
+    elif run_auto:
         run_autorest(
             project=args.project,
             bug=args.bug,
             version=args.version,
             schema_path=args.schema,
             autorest_runs=1 if args.smoke else args.autorest_runs,
-            autorest_output_dir=args.autorest_output_dir,
             autorest_workdir=args.autorest_workdir,
             autorest_time_seconds=autorest_time,
         )
