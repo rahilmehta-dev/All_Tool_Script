@@ -1,6 +1,7 @@
 import subprocess
 import argparse
 import os
+import sys
 import json
 import shutil
 
@@ -29,6 +30,22 @@ AUTOREST_DEFAULT_TIME_SECONDS = 1200   # 20 min per run (MARL phase only)
 
 # Set to True to re-enable AutoRestTest
 AUTOREST_ENABLED = False
+
+
+def run_logged(cmd, log_path, check=True):
+    """Run cmd, streaming output to both the terminal and log_path."""
+    with open(log_path, "w") as log_f:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            log_f.write(line)
+        proc.wait()
+    if check and proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+    return proc.returncode
 
 
 def parse_headers(header_args):
@@ -65,9 +82,8 @@ def checkout(project, bug, version, seed, tool):
         "defects4rest",
         "checkout",
         "-p", project,
-        "-b", str(bug),
-        version,
-        "--start"
+        "-i", str(bug),
+        f"--{version}",
     ]
 
     print("  Running:", " ".join(cmd))
@@ -122,13 +138,12 @@ def run_evomaster(project, bug, version, schema_path, base_url, api_headers, see
             cmd.extend([f"--header{i}", f"{name}: {value}"])
 
         log_file = os.path.join(out_root, f"Seed_{seed}.log")
-        with open(log_file, "w") as f:
-            try:
-                subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=True)
-            except subprocess.CalledProcessError as e:
-                print(f"  EvoMaster seed {seed} failed (exit {e.returncode}), continuing...")
-
         print(f"    Log: {log_file}")
+        try:
+            run_logged(cmd, log_file)
+        except subprocess.CalledProcessError as e:
+            print(f"  EvoMaster seed {seed} failed (exit {e.returncode}), continuing...")
+
         print(f"    Output: {seed_dir_host}\n")
 
 
@@ -172,13 +187,12 @@ def run_schemathesis(project, bug, version, schema_path, base_url, api_headers, 
             cmd.extend(["--header", f"{name}: {value}"])
 
         log_file = os.path.join(out_root, f"Seed_{seed}.log")
-        with open(log_file, "w") as f:
-            try:
-                subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, check=True)
-            except subprocess.CalledProcessError as e:
-                print(f"  Schemathesis seed {seed} failed (exit {e.returncode}), continuing...")
-
         print(f"    Log: {log_file}")
+        try:
+            run_logged(cmd, log_file)
+        except subprocess.CalledProcessError as e:
+            print(f"  Schemathesis seed {seed} failed (exit {e.returncode}), continuing...")
+
         print(f"    HAR: {har_dir}")
         print(f"    JUnit: {junit_path}\n")
 
@@ -234,8 +248,10 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
         "--workingDirPath", out_root_container,
         "compile", f"{out_root_container}/compiler_config.json",
     ]
+    compile_log = os.path.join(out_root, "compile.log")
+    print(f"    Log: {compile_log}")
     try:
-        subprocess.run(compile_cmd, check=True)
+        run_logged(compile_cmd, compile_log)
         print("    Compile done\n")
     except subprocess.CalledProcessError as e:
         print(f"    Compile failed (exit {e.returncode}), skipping RESTler entirely\n")
@@ -256,8 +272,10 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
         "--target_ip", "host.docker.internal",
         "--target_port", str(test_port),
     ]
+    test_log = os.path.join(out_root, "test.log")
+    print(f"    Log: {test_log}")
     try:
-        subprocess.run(test_cmd, check=True)
+        run_logged(test_cmd, test_log)
         print("    Test done\n")
     except subprocess.CalledProcessError as e:
         print(f"    Test failed (exit {e.returncode}), continuing to fuzz...\n")
@@ -287,8 +305,10 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
             "--search_strategy", search_strategy,
         ]
 
+        fuzz_log = os.path.join(out_root, f"Run_{run_num}.log")
+        print(f"    Log: {fuzz_log}")
         try:
-            subprocess.run(fuzz_cmd, check=True)
+            run_logged(fuzz_cmd, fuzz_log)
             print(f"    Finished run {run_num}, output: {run_dir_host}\n")
         except subprocess.CalledProcessError as e:
             print(f"    Fuzz run {run_num} failed (exit {e.returncode}), continuing...\n")
@@ -327,8 +347,10 @@ def run_autorest(project, bug, version, schema_path, autorest_runs, autorest_wor
             "-t", str(autorest_time_seconds),
         ]
 
+        run_log = os.path.join(out_root, f"Run_{i}.log")
+        print(f"    Log: {run_log}")
         try:
-            subprocess.run(cmd, check=True, cwd=autorest_workdir)
+            run_logged(cmd, run_log)
         except subprocess.CalledProcessError as e:
             print(f"    AutoRestTest run {i} failed (exit {e.returncode}), continuing...")
             continue
