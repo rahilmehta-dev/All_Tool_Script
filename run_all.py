@@ -107,8 +107,11 @@ def run_evomaster(project, bug, version, schema_path, base_url, api_headers, see
     out_root = os.path.join(os.getcwd(), f"{project}_{bug}", "EvoMaster")
     os.makedirs(out_root, exist_ok=True)
 
-    schema_basename = os.path.basename(schema_path)
-    evomaster_schema_url = f"file:///work/{schema_basename}"
+    # file:// URIs treat '#' as a fragment separator, so copy the schema to a safe name
+    safe_schema_name = "schema_evomaster.yaml"
+    safe_schema_host = os.path.join(out_root, safe_schema_name)
+    shutil.copy2(schema_path, safe_schema_host)
+    evomaster_schema_url = f"file:///work/{project}_{bug}/EvoMaster/{safe_schema_name}"
 
     for seed in seeds:
         print(f">>> EvoMaster seed {seed}")
@@ -214,8 +217,8 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
     os.makedirs(out_root, exist_ok=True)
     out_root_container = f"/work/{project}_{bug}/RESTler"
 
-    schema_filename = os.path.basename(schema_path)
-    schema_copy_path = os.path.join(out_root, schema_filename)
+    safe_schema_name = "schema_restler.yaml"
+    schema_copy_path = os.path.join(out_root, safe_schema_name)
     shutil.copy2(schema_path, schema_copy_path)
     print(f"[Config] Copied schema to: {schema_copy_path}")
 
@@ -229,7 +232,7 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
         json.dump(custom_dict, f, indent=2)
 
     compiler_config = {
-        "SwaggerSpecFilePath": [f"{out_root_container}/{schema_filename}"],
+        "SwaggerSpecFilePath": [f"{out_root_container}/{safe_schema_name}"],
         "CustomDictionaryFilePath": f"{out_root_container}/restler_custom_dict.json"
     }
     compiler_config_path = os.path.join(out_root, "compiler_config.json")
@@ -564,7 +567,6 @@ if __name__ == "__main__":
     if run_sch:
         # In smoke mode override max_examples globally for this run
         if args.smoke:
-            global SCHEMA_MAX_EXAMPLES
             SCHEMA_MAX_EXAMPLES = SMOKE_SCHEMA_EXAMPLES
         run_schemathesis(
             project=args.project,
