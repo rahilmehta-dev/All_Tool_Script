@@ -16,9 +16,9 @@ DEFAULT_EVOMASTER_HOURS = 1          # default 1 hour per seed
 EVOMASTER_RATE_PER_MIN = 60
 
 # Schemathesis default settings
-SCHEMA_MAX_EXAMPLES = 1
+SCHEMA_MAX_EXAMPLES = 1000
 SCHEMA_WORKERS = 4
-SCHEMA_RATE_LIMIT = "60/s"
+SCHEMA_RATE_LIMIT = "20/s"
 
 # RESTler default settings (in HOURS)
 RESTLER_TIME_BUDGET_DEFAULT = 1      # default 1 hour per seed
