@@ -95,6 +95,19 @@ def checkout(project, bug, version, seed, tool):
         print(f"  Checkout error: {e}")
 
 
+def teardown(project, bug):
+    print(f"\n[teardown] Stopping and cleaning project={project}, bug={bug}")
+    for flag in ("--stop", "--clean"):
+        cmd = ["defects4rest", "checkout", "-p", project, "-i", str(bug), flag]
+        print("  Running:", " ".join(cmd))
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"  Teardown {flag} failed (exit {e.returncode}): {e}")
+        except Exception as e:
+            print(f"  Teardown {flag} error: {e}")
+
+
 # ============================
 # EvoMaster
 # ============================
@@ -146,6 +159,8 @@ def run_evomaster(project, bug, version, schema_path, base_url, api_headers, see
             run_logged(cmd, log_file)
         except subprocess.CalledProcessError as e:
             print(f"  EvoMaster seed {seed} failed (exit {e.returncode}), continuing...")
+        finally:
+            teardown(project, bug)
 
         print(f"    Output: {seed_dir_host}\n")
 
@@ -195,6 +210,8 @@ def run_schemathesis(project, bug, version, schema_path, base_url, api_headers, 
             run_logged(cmd, log_file)
         except subprocess.CalledProcessError as e:
             print(f"  Schemathesis seed {seed} failed (exit {e.returncode}), continuing...")
+        finally:
+            teardown(project, bug)
 
         print(f"    HAR: {har_dir}")
         print(f"    JUnit: {junit_path}\n")
@@ -315,6 +332,8 @@ def run_restler(project, bug, version, schema_path, api_headers, runs, test_port
             print(f"    Finished run {run_num}, output: {run_dir_host}\n")
         except subprocess.CalledProcessError as e:
             print(f"    Fuzz run {run_num} failed (exit {e.returncode}), continuing...\n")
+        finally:
+            teardown(project, bug)
 
 
 # ============================
@@ -352,10 +371,16 @@ def run_autorest(project, bug, version, schema_path, autorest_runs, autorest_wor
 
         run_log = os.path.join(out_root, f"Run_{i}.log")
         print(f"    Log: {run_log}")
+        success = True
         try:
             run_logged(cmd, run_log)
         except subprocess.CalledProcessError as e:
             print(f"    AutoRestTest run {i} failed (exit {e.returncode}), continuing...")
+            success = False
+        finally:
+            teardown(project, bug)
+
+        if not success:
             continue
 
         dest = os.path.join(out_root, f"Run_{i}")
